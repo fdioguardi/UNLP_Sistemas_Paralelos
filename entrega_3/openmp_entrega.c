@@ -33,6 +33,7 @@ double randFP(double min, double max) {
 /*****************************************************************/
 
 int COORDINATOR = 0;
+int AMOUNT_COMMS = 8;
 
 // Main del programa
 int main(int argc, char* argv[]){
@@ -42,9 +43,9 @@ int main(int argc, char* argv[]){
 
 	// Controla los argumentos al programa
 	if ((argc != 3)
-		|| ((N = atoi(argv[1])) <= 0)
-		|| ((bs = atoi(argv[3])) <= 0)
-		|| ((N % bs) != 0))
+			|| ((N = atoi(argv[1])) <= 0)
+			|| ((bs = atoi(argv[3])) <= 0)
+			|| ((N % bs) != 0))
 	{
 		printf("\nError en los parámetros. Usage: ./%s N T BS (N debe ser multiplo de BS)\n", argv[0]);
 		exit(1);
@@ -64,6 +65,7 @@ int main(int argc, char* argv[]){
 	double localAverage1, localAverage2;
 	double *blockR1, *blockR2, *blockM, *blockT, *blockRA, *blockRB, *blockC;
 	double average[2], localAverage[2];
+	double commTimes[AMOUNT_COMMS], maxCommTimes[AMOUNT_COMMS], minCommTimes[AMOUNT_COMMS], commTime, totalTime;
 
 	// Inicializa MPI
 	MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, NULL); // TODO: guarda con el null, fijate la teoría como lo hace
@@ -225,102 +227,123 @@ int main(int argc, char* argv[]){
 	blockRB = (double*)malloc(sizeof(double)*cellAmount);
 	blockC  = (double*)malloc(sizeof(double)*cellAmount);
 
-	MPI_Scatter(M, cellAmount, MPI_INT, blockM, cellAmount, MPI_INT, COORDINATOR, MPI_COMM_WORLD);
-	MPI_Scatter(T, cellAmount, MPI_INT, blockT, cellAmount, MPI_INT, COORDINATOR, MPI_COMM_WORLD);
+	// Cronometrado de la primer comunicación
+	commTimes[0] =  dwalltime();
 
-	// Inicia el timer
-	timetick_start = dwalltime();
+	MPI_Scatter(M, cellAmount, MPI_DOUBLE, blockM, cellAmount, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
+	MPI_Scatter(T, cellAmount, MPI_DOUBLE, blockT, cellAmount, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
+
+	commTimes[1] = dwalltime();
 
 	// Broadcastea las matrices que se usan enteras
+	commTimes[2] =  dwalltime();
+
 	MPI_Bcast(A, size, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
 	MPI_Bcast(B, size, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
 
+	commTimes[3] = dwalltime();
+
 #pragma omp parallel
-{
+	{
 
-	// Calcula Rs
+		// Calcula Rs
 #pragma omp reduction(+:localAverage[0], +:localAverage[1]) private(i, num, aSin, aCos) nowait
-	for (i = 0; i < cellAmount; i++) {
-		num = (1 - blockT[i]);
-		aSin = sin(blockM[i]);
-		aCos = cos(blockM[i]);
-		blockR1[i] = num * (1 - aCos) + (blockT[i] * aSin);
-		blockR2[i] = num * (1 - aSin) + (blockT[i] * aCos);
-		localAverage[0] += blockR1[i];
-		localAverage[1] += blockR2[i];
-	}
+		for (i = 0; i < cellAmount; i++) {
+			num = (1 - blockT[i]);
+			aSin = sin(blockM[i]);
+			aCos = cos(blockM[i]);
+			blockR1[i] = num * (1 - aCos) + (blockT[i] * aSin);
+			blockR2[i] = num * (1 - aSin) + (blockT[i] * aCos);
+			localAverage[0] += blockR1[i];
+			localAverage[1] += blockR2[i];
+		}
 
-	// RA = R1 * A
+		// RA = R1 * A
 #pragma omp for private(i, offset_i, j, offset_j, k, ablk, bblk, cblk, f, offset_f, c, offset_c, h, mini_row_index) nowait
-	for (i = 0; i < blockSize; i += bs)
-	{
-		offset_i = i * N;
-		for (j = 0; j < N; j += bs)
+		for (i = 0; i < blockSize; i += bs)
 		{
-			offset_j = j * N;
-			cblk = &blockRA[offset_i + j];
-
-			for  (k = 0; k < N; k += bs)
+			offset_i = i * N;
+			for (j = 0; j < N; j += bs)
 			{
-				ablk = &blockR1[offset_i + k];
-				bblk = &A[offset_j + k];
+				offset_j = j * N;
+				cblk = &blockRA[offset_i + j];
 
-				for (f = 0; f < bs; f++)
+				for  (k = 0; k < N; k += bs)
 				{
-					offset_f = f * N;
-					for (c = 0; c < bs; c++)
+					ablk = &blockR1[offset_i + k];
+					bblk = &A[offset_j + k];
+
+					for (f = 0; f < bs; f++)
 					{
-						offset_c = c * N;
-						mini_row_index = offset_f + c;
-
-						for  (h = 0; h < bs; h++)
+						offset_f = f * N;
+						for (c = 0; c < bs; c++)
 						{
-							cblk[mini_row_index] += ablk[offset_f + h] * bblk[offset_c + h];
-						} } } } } }
+							offset_c = c * N;
+							mini_row_index = offset_f + c;
 
-	// RB = R2 * B
+							for  (h = 0; h < bs; h++)
+							{
+								cblk[mini_row_index] += ablk[offset_f + h] * bblk[offset_c + h];
+							} } } } } }
+
+		// RB = R2 * B
 #pragma omp for private(i, offset_i, j, offset_j, k, ablk, bblk, cblk, f, offset_f, c, offset_c, h, mini_row_index) nowait
-	for (i = 0; i < blockSize; i += bs)
-	{
-		offset_i = i * N;
-		for (j = 0; j < N; j += bs)
+		for (i = 0; i < blockSize; i += bs)
 		{
-			offset_j = j * N;
-			cblk = &blockRB[offset_i + j];
-
-			for  (k = 0; k < N; k += bs)
+			offset_i = i * N;
+			for (j = 0; j < N; j += bs)
 			{
-				ablk = &blockR2[offset_i + k];
-				bblk = &B[offset_j + k];
+				offset_j = j * N;
+				cblk = &blockRB[offset_i + j];
 
-				for (f = 0; f < bs; f++)
+				for  (k = 0; k < N; k += bs)
 				{
-					offset_f = f * N;
-					for (c = 0; c < bs; c++)
+					ablk = &blockR2[offset_i + k];
+					bblk = &B[offset_j + k];
+
+					for (f = 0; f < bs; f++)
 					{
-						offset_c = c * N;
-						mini_row_index = offset_f + c;
-
-						for  (h = 0; h < bs; h++)
+						offset_f = f * N;
+						for (c = 0; c < bs; c++)
 						{
-							cblk[mini_row_index] += ablk[offset_f + h] * bblk[offset_c + h];
-						} } } } } }
+							offset_c = c * N;
+							mini_row_index = offset_f + c;
+
+							for  (h = 0; h < bs; h++)
+							{
+								cblk[mini_row_index] += ablk[offset_f + h] * bblk[offset_c + h];
+							} } } } } }
 
 
-	// Calcula promedios de Rs
+		// Calcula promedios de Rs
 #pragma omp single
-{
-	MPI_Allreduce(localAverage, average, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-	average1 = (average[0] / size) * (average[1] / size);
-}
+		{
+			commTimes[4] = dwalltime();
 
-	// Calcula C
+			MPI_Allreduce(localAverage, average, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+			average1 = (average[0] / size) * (average[1] / size);
+
+			commTimes[5] = dwalltime();
+		}
+
+		// Calcula C
 #pragma omp for private(i)
-	for (i = 0; i < cellAmount; i++) {
-		blockC[i] = blockT[i] + average1 * (blockRA[i] + blockRB[i]);
+		for (i = 0; i < cellAmount; i++) {
+			blockC[i] = blockT[i] + average1 * (blockRA[i] + blockRB[i]);
+		}
 	}
-}
+
+	commTimes[6] = dwalltime();
+
 	MPI_Gather(blockC, cellAmount, MPI_DOUBLE, C, cellAmount, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
+
+	commTimes[7] = dwalltime();
+
+
+	// Totaliza los tiempos de comunicación
+	MPI_Reduce(commTimes, minCommTimes, 8, MPI_DOUBLE, MPI_MIN, COORDINATOR, MPI_COMM_WORLD);
+	MPI_Reduce(commTimes, maxCommTimes, 8, MPI_DOUBLE, MPI_MAX, COORDINATOR, MPI_COMM_WORLD);
+
 
 	// Termina MPI
 	MPI_Finalize();
@@ -356,6 +379,14 @@ int main(int argc, char* argv[]){
 		}
 		if (check) {
 			printf("Multiplicacion de matrices resultado correcto\n");
+
+			totalTime = maxCommTimes[AMOUNT_COMMS - 1] - minCommTimes[0];
+			commTime = 0;
+			for (i = 0; i < AMOUNT_COMMS; i += 2) {
+				commTime += (maxCommTimes[i + 1] - minCommTimes[i]);
+			}
+
+			printf("Multiplicacion de matrices (N=%d)\tTiempo total=%lf\tTiempo comunicacion=%lf\n", N, totalTime, commTime);
 		}
 		else {
 			printf("Multiplicacion de matrices resultado erroneo\n");

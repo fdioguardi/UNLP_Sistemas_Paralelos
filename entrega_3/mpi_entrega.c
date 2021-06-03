@@ -32,6 +32,7 @@ double randFP(double min, double max) {
 /*****************************************************************/
 
 int COORDINATOR = 0;
+int AMOUNT_COMMS = 8;
 
 // Main del programa
 int main(int argc, char* argv[]){
@@ -42,10 +43,10 @@ int main(int argc, char* argv[]){
 	// Controla los argumentos al programa
 	if ((argc != 3)
 		|| ((N = atoi(argv[1])) <= 0)
-		|| ((bs = atoi(argv[3])) <= 0)
+		|| ((bs = atoi(argv[2])) <= 0)
 		|| ((N % bs) != 0))
 	{
-		printf("\nError en los parámetros. Usage: ./%s N T BS (N debe ser multiplo de BS)\n", argv[0]);
+		printf("\nError en los parámetros. Usage: ./%s N BS (N debe ser multiplo de BS)\n", argv[0]);
 		exit(1);
 	}
 
@@ -63,6 +64,7 @@ int main(int argc, char* argv[]){
 	double localAverage1, localAverage2;
 	double *blockR1, *blockR2, *blockM, *blockT, *blockRA, *blockRB, *blockC;
 	double average[2], localAverage[2];
+	double commTimes[AMOUNT_COMMS], maxCommTimes[AMOUNT_COMMS], minCommTimes[AMOUNT_COMMS], commTime, totalTime;
 
 	// Inicializa MPI
 	MPI_Init(&argc, &argv);
@@ -209,6 +211,10 @@ int main(int argc, char* argv[]){
 		average1 = 0;
 	}
 
+
+	/*********************************** MPI ******************************/
+
+
 	// Setear los bloques
 	blockSize = N / numProcs;
 	cellAmount = blockSize * N;
@@ -221,11 +227,21 @@ int main(int argc, char* argv[]){
 	blockRB = (double*)malloc(sizeof(double)*cellAmount);
 	blockC  = (double*)malloc(sizeof(double)*cellAmount);
 
-	MPI_Scatter(M, cellAmount, MPI_INT, blockM, cellAmount, MPI_INT, COORDINATOR, MPI_COMM_WORLD);
-	MPI_Scatter(T, cellAmount, MPI_INT, blockT, cellAmount, MPI_INT, COORDINATOR, MPI_COMM_WORLD);
+	// Cronometrado de la primer comunicación
+	commTimes[0] =  dwalltime();
 
-	// Inicia el timer
-	timetick_start = dwalltime();
+	MPI_Scatter(M, cellAmount, MPI_DOUBLE, blockM, cellAmount, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
+	MPI_Scatter(T, cellAmount, MPI_DOUBLE, blockT, cellAmount, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
+
+	commTimes[1] = dwalltime();
+
+	// Broadcastea las matrices que se usan enteras
+	commTimes[2] =  dwalltime();
+
+	MPI_Bcast(A, size, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
+	MPI_Bcast(B, size, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
+
+	commTimes[3] = dwalltime();
 
 	// Calcula Rs
 	for (i = 0; i < cellAmount; i++) {
@@ -237,10 +253,6 @@ int main(int argc, char* argv[]){
 		localAverage[0] += blockR1[i];
 		localAverage[1] += blockR2[i];
 	}
-
-	// Broadcastea las matrices que se usan enteras
-	MPI_Bcast(A, size, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
-	MPI_Bcast(B, size, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
 
 	// RA = R1 * A
 	for (i = 0; i < blockSize; i += bs)
@@ -297,22 +309,30 @@ int main(int argc, char* argv[]){
 						} } } } } }
 
 	// Calcula promedios de Rs
+	commTimes[4] = dwalltime();
+
 	MPI_Allreduce(localAverage, average, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 	average1 = (average[0] / size) * (average[1] / size);
+
+	commTimes[5] = dwalltime();
 
 	// Calcula C
 	for (i = 0; i < cellAmount; i++) {
 		blockC[i] = blockT[i] + average1 * (blockRA[i] + blockRB[i]);
 	}
 
+
+	commTimes[6] = dwalltime();
 	MPI_Gather(blockC, cellAmount, MPI_DOUBLE, C, cellAmount, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
+	commTimes[7] = dwalltime();
+
+
+	// Totaliza los tiempos de comunicación
+	MPI_Reduce(commTimes, minCommTimes, 8, MPI_DOUBLE, MPI_MIN, COORDINATOR, MPI_COMM_WORLD);
+	MPI_Reduce(commTimes, maxCommTimes, 8, MPI_DOUBLE, MPI_MAX, COORDINATOR, MPI_COMM_WORLD);
 
 	// Termina MPI
 	MPI_Finalize();
-
-	// Detiene el timer
-	timetick_end = dwalltime();
-
 
 	// Free matrices paralelas
 	free(blockR1);
@@ -341,10 +361,20 @@ int main(int argc, char* argv[]){
 		}
 		if (check) {
 			printf("Multiplicacion de matrices resultado correcto\n");
+
+			totalTime = maxCommTimes[AMOUNT_COMMS - 1] - minCommTimes[0];
+			commTime = 0;
+			for (i = 0; i < AMOUNT_COMMS; i += 2) {
+				commTime += (maxCommTimes[i + 1] - minCommTimes[i]);
+			}
+
+			printf("Multiplicacion de matrices (N=%d)\tTiempo total=%lf\tTiempo comunicacion=%lf\n", N, totalTime, commTime);
 		}
 		else {
 			printf("Multiplicacion de matrices resultado erroneo\n");
 		}
+
+
 
 		// Libera memoria
 		free(A);
