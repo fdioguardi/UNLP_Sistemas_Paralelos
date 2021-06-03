@@ -31,7 +31,7 @@ double randFP(double min, double max) {
 
 /*****************************************************************/
 
-int COORDINATOR = 0;
+#define COORDINATOR 0
 int AMOUNT_COMMS = 8;
 
 // Main del programa
@@ -67,19 +67,20 @@ int main(int argc, char* argv[]){
 	double commTimes[AMOUNT_COMMS], maxCommTimes[AMOUNT_COMMS], minCommTimes[AMOUNT_COMMS], commTime, totalTime;
 
 	// Inicializa MPI
-	MPI_Init(&argc, &argv);
+	MPI_Init(NULL, NULL);
 
 	// Setea cantidad de hilos y rank
 	MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
-	MPI_Comm_size(MPI_COMM_WORLD, &rank);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+	// Matrices alocadas por todos los nodos
+	A  = (double*)malloc(sizeof(double)*size); // ordenada por columnas
+	B  = (double*)malloc(sizeof(double)*size); // ordenada por columnas
 
 	if (rank == COORDINATOR) {
 		double *C_secuencial, average2, timetick_start_secuencial, timetick_end_secuencial;
 
-		// Aloca memoria para las matrices
-		A  = (double*)malloc(sizeof(double)*size); // ordenada por columnas
-		B  = (double*)malloc(sizeof(double)*size); // ordenada por columnas
+		// Aloca memoria para las matrices en el coordinador
 		C  = (double*)malloc(sizeof(double)*size); // ordenada por filas
 		C_secuencial = (double*)malloc(sizeof(double)*size); // ordenada por filas
 		T  = (double*)malloc(sizeof(double)*size); // ordenada por filas
@@ -326,7 +327,6 @@ int main(int argc, char* argv[]){
 	MPI_Gather(blockC, cellAmount, MPI_DOUBLE, C, cellAmount, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
 	commTimes[7] = dwalltime();
 
-
 	// Totaliza los tiempos de comunicación
 	MPI_Reduce(commTimes, minCommTimes, 8, MPI_DOUBLE, MPI_MIN, COORDINATOR, MPI_COMM_WORLD);
 	MPI_Reduce(commTimes, maxCommTimes, 8, MPI_DOUBLE, MPI_MAX, COORDINATOR, MPI_COMM_WORLD);
@@ -348,11 +348,14 @@ int main(int argc, char* argv[]){
 
 
 	if (rank == COORDINATOR) {
-		printf("Tiempo en segundos con OpenMP %f\n", timetick_end - timetick_start);
+		/* printf("Tiempo en segundos con MPI %f\n", timetick_end - timetick_start); */
 
 		// Comprueba que C y C_secuencial sean iguales
 		int check = 1;
 		for (i = 0; i < size; i++) {
+
+			/* printf("%f", C_secuencial[size]); */
+			/* printf("hola");exit(0); */
 			if (fabs(C[i] - C_secuencial[i]) > 0.000001) {
 				printf("C: paralelo: %f, secuencial: %f, indice: %d", C[i], C_secuencial[i], i);
 				check = 0;
@@ -377,8 +380,6 @@ int main(int argc, char* argv[]){
 
 
 		// Libera memoria
-		free(A);
-		free(B);
 		free(C);
 		free(C_secuencial);
 		free(T);
@@ -388,6 +389,9 @@ int main(int argc, char* argv[]){
 		free(RA);
 		free(RB);
 	}
+
+	free(A);
+	free(B);
 
 	return(0);
 }
