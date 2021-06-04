@@ -31,47 +31,49 @@ double randFP(double min, double max) {
 
 /*****************************************************************/
 
-#define COORDINATOR 0
+int COORDINATOR = 0;
 int AMOUNT_COMMS = 8;
 
 // Main del programa
 int main(int argc, char* argv[]){
 
+	// Inicializa MPI
+	MPI_Init(&argc, &argv);
+
+	int numProcs, rank, stripSize, blockSize, cellAmount, pos;
+	double localAverage1, localAverage2;
+	double *blockR1, *blockR2, *blockM, *blockT, *blockRA, *blockRB, *blockC;
+	double average[2], localAverage[2];
+	double commTimes[AMOUNT_COMMS], maxCommTimes[AMOUNT_COMMS], minCommTimes[AMOUNT_COMMS], commTime, totalTime;
 	double *A, *B, *C, *C_secuencial, *T, *M, *R1, *R2, *RA, *RB, num, aSin, aCos, timetick_start, timetick_end, *ablk, *bblk, *cblk, average1;
 	int N, i, j, k, bs, offset_i, offset_j, row_index, f, c, h, offset_f, offset_c, mini_row_index, size;
+
+
+	// Setea cantidad de hilos y rank
+	MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+	blockSize = N / numProcs;
+	cellAmount = blockSize * N;
+	size = N*N;
 
 	// Controla los argumentos al programa
 	if ((argc != 3)
 		|| ((N = atoi(argv[1])) <= 0)
 		|| ((bs = atoi(argv[2])) <= 0)
-		|| ((N % bs) != 0))
+		|| ((N % bs) != 0)
+		|| (blockSize < bs))
 	{
-		printf("\nError en los parámetros. Usage: ./%s N BS (N debe ser multiplo de BS)\n", argv[0]);
+		printf("\nError en los parámetros. Usage: ./%s N BS (N debe ser multiplo de BS y BS debe ser menor que N/número_de_procesos)\n", argv[0]);
 		exit(1);
 	}
 
-
-	size = N*N;
 
 	// Inicializa el randomizador
 	time_t t;
 	srand((unsigned) time(&t));
 
 	/*****************************************************************/
-
-	// Declara variables para el algoritmo paralelo
-	int numProcs, rank, stripSize, blockSize, cellAmount, pos;
-	double localAverage1, localAverage2;
-	double *blockR1, *blockR2, *blockM, *blockT, *blockRA, *blockRB, *blockC;
-	double average[2], localAverage[2];
-	double commTimes[AMOUNT_COMMS], maxCommTimes[AMOUNT_COMMS], minCommTimes[AMOUNT_COMMS], commTime, totalTime;
-
-	// Inicializa MPI
-	MPI_Init(NULL, NULL);
-
-	// Setea cantidad de hilos y rank
-	MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
 	// Matrices alocadas por todos los nodos
 	A  = (double*)malloc(sizeof(double)*size); // ordenada por columnas
@@ -201,7 +203,7 @@ int main(int argc, char* argv[]){
 
 		printf("Tiempo en segundos del secuencial %f\n", timetick_end_secuencial - timetick_start_secuencial);
 
-		// Resetea las matrices R1, R2, RA, RB, y C
+		// Resetea las matrices R1, R2, RA, RB
 		for(i = 0; i < size ; i++) {
 			R1[i] = 0;
 			R2[i] = 0;
@@ -217,9 +219,6 @@ int main(int argc, char* argv[]){
 
 
 	// Setear los bloques
-	blockSize = N / numProcs;
-	cellAmount = blockSize * N;
-
 	blockR1 = (double*)malloc(sizeof(double)*cellAmount);
 	blockR2 = (double*)malloc(sizeof(double)*cellAmount);
 	blockM  = (double*)malloc(sizeof(double)*cellAmount);
@@ -313,9 +312,10 @@ int main(int argc, char* argv[]){
 	commTimes[4] = dwalltime();
 
 	MPI_Allreduce(localAverage, average, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-	average1 = (average[0] / size) * (average[1] / size);
 
 	commTimes[5] = dwalltime();
+
+	average1 = (average[0] / size) * (average[1] / size);
 
 	// Calcula C
 	for (i = 0; i < cellAmount; i++) {
@@ -324,15 +324,14 @@ int main(int argc, char* argv[]){
 
 
 	commTimes[6] = dwalltime();
+
 	MPI_Gather(blockC, cellAmount, MPI_DOUBLE, C, cellAmount, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
+
 	commTimes[7] = dwalltime();
 
 	// Totaliza los tiempos de comunicación
-	MPI_Reduce(commTimes, minCommTimes, 8, MPI_DOUBLE, MPI_MIN, COORDINATOR, MPI_COMM_WORLD);
-	MPI_Reduce(commTimes, maxCommTimes, 8, MPI_DOUBLE, MPI_MAX, COORDINATOR, MPI_COMM_WORLD);
-
-	// Termina MPI
-	MPI_Finalize();
+	MPI_Reduce(commTimes, minCommTimes, AMOUNT_COMMS, MPI_DOUBLE, MPI_MIN, COORDINATOR, MPI_COMM_WORLD);
+	MPI_Reduce(commTimes, maxCommTimes, AMOUNT_COMMS, MPI_DOUBLE, MPI_MAX, COORDINATOR, MPI_COMM_WORLD);
 
 	// Free matrices paralelas
 	free(blockR1);
@@ -354,14 +353,13 @@ int main(int argc, char* argv[]){
 		int check = 1;
 		for (i = 0; i < size; i++) {
 
-			/* printf("%f", C_secuencial[size]); */
-			/* printf("hola");exit(0); */
 			if (fabs(C[i] - C_secuencial[i]) > 0.000001) {
 				printf("C: paralelo: %f, secuencial: %f, indice: %d", C[i], C_secuencial[i], i);
 				check = 0;
 				break;
 			}
 		}
+
 		if (check) {
 			printf("Multiplicacion de matrices resultado correcto\n");
 
@@ -392,6 +390,9 @@ int main(int argc, char* argv[]){
 
 	free(A);
 	free(B);
+
+	// Termina MPI
+	MPI_Finalize();
 
 	return(0);
 }
