@@ -60,7 +60,7 @@ int main(int argc, char* argv[]){
 		|| ((rowAmount = (N / numProcs)) < bs))
 	{
 		printf("\nError en los parámetros. Usage: ./%s N BS (N debe ser multiplo de BS y BS debe ser menor que N/número_de_procesos)\n", argv[0]);
-		exit(1);
+		return EXIT_FAILURE;
 	}
 
 	cellAmount = rowAmount * N;
