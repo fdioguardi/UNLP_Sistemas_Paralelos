@@ -38,23 +38,22 @@ int main(int argc, char* argv[]){
 	int COORDINATOR = 0;
 	int AMOUNT_COMMS = 6;
 
-	int numProcs, rank, stripSize, rowAmount, cellAmount, pos;
-	double localAverage1, localAverage2;
+	int numProcs, rank, rowAmount, cellAmount;
 	double average[2], localAverage[2];
 	double commTimes[AMOUNT_COMMS], maxCommTimes[AMOUNT_COMMS], minCommTimes[AMOUNT_COMMS], commTime, totalTime;
-	double *A, *B, *C, *T, *M, *R1, *R2, *RA, *RB, num, aSin, aCos, timetick_start, timetick_end, *ablk, *bblk, *cblk, average1;
+	double *A, *B, *C, *T, *M, *R1, *R2, *RA, *RB, num, aSin, aCos, *ablk, *bblk, *cblk;
 	int N, i, j, k, bs, offset_i, offset_j, row_index, f, c, h, offset_f, offset_c, mini_row_index, size;
 
-	// Setea cantidad de hilos y rank
+	// Setea cantidad de nodos y rank
 	MPI_Comm_size(MPI_COMM_WORLD, &numProcs);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
 	// Controla los argumentos al programa
 	if ((argc != 3)
-	|| ((N = atoi(argv[1])) <= 0)
-	|| ((bs = atoi(argv[2])) <= 0)
-	|| (N % bs != 0)
-	|| ((rowAmount = (N / numProcs)) < bs))
+		|| ((N = atoi(argv[1])) <= 0)
+		|| ((bs = atoi(argv[2])) <= 0)
+		|| (N % bs != 0)
+		|| ((rowAmount = (N / numProcs)) < bs))
 	{
 		printf("\nError en los parámetros. Usage: ./%s N BS (N debe ser multiplo de BS y BS debe ser menor que N/número_de_procesos)\n", argv[0]);
 		exit(1);
@@ -97,7 +96,7 @@ int main(int argc, char* argv[]){
 		}
 	}
 	else {
-		// Setear los bloques
+		// Aloca memoria en otros nodos
 		C  = (double*)malloc(sizeof(double)*cellAmount);
 		T  = (double*)malloc(sizeof(double)*cellAmount);
 		M  = (double*)malloc(sizeof(double)*cellAmount);
@@ -134,12 +133,14 @@ int main(int argc, char* argv[]){
 		localAverage[1] += R2[i];
 	}
 
-	// Calcula la suma de Rs
+
+	// Calcula promedios de Rs
 	commTimes[2] = dwalltime();
-
 	MPI_Allreduce(localAverage, average, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-
 	commTimes[3] = dwalltime();
+
+	average[0] = (average[0] / size) * (average[1] / size);
+
 
 	// RA = R1 * A
 	for (i = 0; i < rowAmount; i += bs)
@@ -195,12 +196,9 @@ int main(int argc, char* argv[]){
 							cblk[mini_row_index] += ablk[offset_f + h] * bblk[offset_c + h];
 						} } } } } }
 
-	// Calcula promedios de Rs
-	average1 = (average[0] / size) * (average[1] / size);
-
 	// Calcula C
 	for (i = 0; i < cellAmount; i++) {
-		C[i] = T[i] + average1 * (RA[i] + RB[i]);
+		C[i] = T[i] + average[0] * (RA[i] + RB[i]);
 	}
 
 
@@ -220,7 +218,7 @@ int main(int argc, char* argv[]){
 
 	if (rank == COORDINATOR) {
 
-		double average2, timetick_start_secuencial, *C_secuencial,  timetick_end_secuencial;
+		double timetick_start_secuencial, *C_secuencial,  timetick_end_secuencial;
 
 		// Aloca matriz secuencial
 		C_secuencial = (double*)malloc(sizeof(double)*size); // ordenada por filas
@@ -231,8 +229,8 @@ int main(int argc, char* argv[]){
 			RB[i] = 0;
 		}
 
-		average1 = 0;
-		average2 = 0;
+		average[0] = 0;
+		average[1] = 0;
 
 		// Inicia el timer
 		timetick_start_secuencial = dwalltime();
@@ -245,8 +243,8 @@ int main(int argc, char* argv[]){
 			R1[i] = num * (1 - aCos) + (T[i] * aSin);
 			R2[i] = num * (1 - aSin) + (T[i] * aCos);
 
-			average1 += R1[i];
-			average2 += R2[i];
+			average[0] += R1[i];
+			average[1] += R2[i];
 		}
 
 		// RA = R1 * A
@@ -314,11 +312,11 @@ int main(int argc, char* argv[]){
 		}
 
 		// Calcula el promedio de Rs
-		average1 = (average1 / size) * (average2 / size);
+		average[0] = (average[0] / size) * (average[1] / size);
 
 		// Calcula C_secuencial
 		for (i = 0; i < size; i++) {
-			C_secuencial[i] = T[i] + average1 * (RA[i] + RB[i]);
+			C_secuencial[i] = T[i] + average[0] * (RA[i] + RB[i]);
 		}
 
 		// Detiene el timer
