@@ -30,10 +30,6 @@ double randFP(double min, double max) {
 
 /*****************************************************************/
 
-int N, size, bs, rowAmount, cellAmount;
-double *A, *B, *C, *T, *M, *R1, *R2, *RA, *RB;
-double localAverage[2], average[2];
-
 // Main del programa
 int main(int argc, char* argv[]){
 
@@ -43,7 +39,9 @@ int main(int argc, char* argv[]){
 	int COORDINATOR = 0;
 	int AMOUNT_COMMS = 6;
 
-	int numProcs, rank;
+	int N, size, bs, rowAmount, cellAmount, numProcs, rank;
+	double *A, *B, *C, *T, *M, *R1, *R2, *RA, *RB;
+	double localAverage[2], average[2];
 	double commTimes[AMOUNT_COMMS], maxCommTimes[AMOUNT_COMMS], minCommTimes[AMOUNT_COMMS], commTime, totalTime;
 	double num, aSin, aCos, *ablk, *bblk, *cblk;
 	int i, j, k, offset_i, offset_j, row_index, f, c, h, offset_f, offset_c, mini_row_index;
