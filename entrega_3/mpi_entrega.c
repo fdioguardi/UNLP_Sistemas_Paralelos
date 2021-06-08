@@ -52,16 +52,19 @@ int main(int argc, char* argv[]){
 	if ((argc != 3)
 		|| ((N = atoi(argv[1])) <= 0)
 		|| ((bs = atoi(argv[2])) <= 0)
-		|| (N % bs != 0)
-		|| ((rowAmount = (N / numProcs)) < bs))
+		|| (N % bs != 0))
 	{
-		printf("\nError en los parámetros. Usage: ./%s N BS (N debe ser multiplo de BS y BS debe ser menor que N/número_de_procesos)\n", argv[0]);
+		printf("\nError en los parámetros. Usage: ./%s N BS (N debe ser multiplo de BS)\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 
+	rowAmount = N / numProcs;
 	cellAmount = rowAmount * N;
 	size = N*N;
 
+	if (rowAmount < bs) {
+		bs = rowAmount;
+	}
 
 	// Inicializa el randomizador
 	time_t t;
