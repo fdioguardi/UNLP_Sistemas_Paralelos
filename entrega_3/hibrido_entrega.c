@@ -34,7 +34,8 @@ double randFP(double min, double max) {
 int main(int argc, char* argv[]){
 
 	// Inicializa MPI
-	MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, NULL);
+	int provided;
+	MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
 
 	int COORDINATOR = 0;
 	int AMOUNT_COMMS = 6;
@@ -63,6 +64,9 @@ int main(int argc, char* argv[]){
 	rowAmount = N / numProcs;
 	cellAmount = rowAmount * N;
 	size = N*N;
+
+	localAverage[0] = 0;
+	localAverage[1] = 0;
 
 	if (rowAmount < bs) {
 		bs = rowAmount;
@@ -114,6 +118,8 @@ int main(int argc, char* argv[]){
 
 	/*********************************** MPI ******************************/
 
+	// Setea numero de hilos
+	omp_set_num_threads(8);
 
 	commTimes[0] =  dwalltime();
 
@@ -126,12 +132,11 @@ int main(int argc, char* argv[]){
 	MPI_Bcast(B, size, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
 
 	commTimes[1] = dwalltime();
-
 	#pragma omp parallel
 	{
 
 		// Calcula Rs
-		#pragma omp reduction(+:localAverage[0], +:localAverage[1]) private(i, num, aSin, aCos) nowait
+		#pragma omp for reduction(+:localAverage) private(i, num, aSin, aCos)
 		for (i = 0; i < cellAmount; i++) {
 			num = (1 - T[i]);
 			aSin = sin(M[i]);
@@ -183,7 +188,7 @@ int main(int argc, char* argv[]){
 		} 	} 	} 	} 	} 	}
 
 		// RB = R2 * B
-		#pragma omp for private(i, offset_i, j, offset_j, k, ablk, bblk, cblk, f, offset_f, c, offset_c, h, mini_row_index) nowait
+		#pragma omp for private(i, offset_i, j, offset_j, k, ablk, bblk, cblk, f, offset_f, c, offset_c, h, mini_row_index)
 		for (i = 0; i < rowAmount; i += bs)
 		{
 			offset_i = i * N;
@@ -244,6 +249,9 @@ int main(int argc, char* argv[]){
 			RA[i] = 0;
 			RB[i] = 0;
 		}
+
+		average[0] = 0;
+		average[1] = 0;
 
 		// Inicia el timer
 		timetick_start_secuencial = dwalltime();
