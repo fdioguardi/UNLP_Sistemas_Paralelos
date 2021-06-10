@@ -43,7 +43,7 @@ int main(int argc, char* argv[]){
 	int N, size, bs, rowAmount, cellAmount, numProcs, rank;
 	double *A, *B, *C, *T, *M, *R1, *R2, *RA, *RB;
 	double localAverage[2], average[2];
-	double commTimes[AMOUNT_COMMS], maxCommTimes[AMOUNT_COMMS], minCommTimes[AMOUNT_COMMS], commTime, totalTime;
+	double commTimes[AMOUNT_COMMS], commTime, totalTime;
 	double num, aSin, aCos, *ablk, *bblk, *cblk;
 	int i, j, k, offset_i, offset_j, row_index, f, c, h, offset_f, offset_c, mini_row_index;
 
@@ -53,9 +53,9 @@ int main(int argc, char* argv[]){
 
 	// Controla los argumentos al programa
 	if ((argc != 3)
-		|| ((N = atoi(argv[1])) <= 0)
-		|| ((bs = atoi(argv[2])) <= 0)
-		|| (N % bs != 0))
+	|| ((N = atoi(argv[1])) <= 0)
+	|| ((bs = atoi(argv[2])) <= 0)
+	|| (N % bs != 0))
 	{
 		printf("\nError en los parámetros. Usage: ./%s N BS (N debe ser multiplo de BS)\n", argv[0]);
 		return EXIT_FAILURE;
@@ -118,10 +118,9 @@ int main(int argc, char* argv[]){
 
 	/*********************************** MPI ******************************/
 
-	// Setea numero de hilos
-	omp_set_num_threads(8);
-
-	commTimes[0] =  dwalltime();
+	if (rank == COORDINATOR) {
+		commTimes[0] =  dwalltime();
+	}
 
 	// Reparte las matrices M y T
 	MPI_Scatter(M, cellAmount, MPI_DOUBLE, M, cellAmount, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
@@ -131,7 +130,9 @@ int main(int argc, char* argv[]){
 	MPI_Bcast(A, size, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
 	MPI_Bcast(B, size, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
 
-	commTimes[1] = dwalltime();
+	if (rank == COORDINATOR) {
+		commTimes[1] = dwalltime();
+	}
 	#pragma omp parallel
 	{
 
@@ -151,9 +152,13 @@ int main(int argc, char* argv[]){
 		// Calcula promedios de Rs
 		#pragma omp single
 		{
-			commTimes[2] = dwalltime();
+			if (rank == COORDINATOR) {
+				commTimes[2] = dwalltime();
+			}
 			MPI_Allreduce(localAverage, average, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-			commTimes[3] = dwalltime();
+			if (rank == COORDINATOR) {
+				commTimes[3] = dwalltime();
+			}
 
 			average[0] = (average[0] / size) * (average[1] / size);
 		}
@@ -185,7 +190,7 @@ int main(int argc, char* argv[]){
 							for  (h = 0; h < bs; h++)
 							{
 								cblk[mini_row_index] += ablk[offset_f + h] * bblk[offset_c + h];
-		} 	} 	} 	} 	} 	}
+							} 	} 	} 	} 	} 	}
 
 		// RB = R2 * B
 		#pragma omp for private(i, offset_i, j, offset_j, k, ablk, bblk, cblk, f, offset_f, c, offset_c, h, mini_row_index)
@@ -213,7 +218,7 @@ int main(int argc, char* argv[]){
 							for  (h = 0; h < bs; h++)
 							{
 								cblk[mini_row_index] += ablk[offset_f + h] * bblk[offset_c + h];
-		} 	} 	} 	} 	} 	}
+							} 	} 	} 	} 	} 	}
 
 		// Calcula C
 		#pragma omp for private(i)
@@ -224,15 +229,15 @@ int main(int argc, char* argv[]){
 
 
 	// Junta el resultado
-	commTimes[4] = dwalltime();
+	if (rank == COORDINATOR) {
+		commTimes[4] = dwalltime();
+	}
 
 	MPI_Gather(C, cellAmount, MPI_DOUBLE, C, cellAmount, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
 
-	commTimes[5] = dwalltime();
-
-	// Totaliza los tiempos de comunicación
-	MPI_Reduce(commTimes, minCommTimes, AMOUNT_COMMS, MPI_DOUBLE, MPI_MIN, COORDINATOR, MPI_COMM_WORLD);
-	MPI_Reduce(commTimes, maxCommTimes, AMOUNT_COMMS, MPI_DOUBLE, MPI_MAX, COORDINATOR, MPI_COMM_WORLD);
+	if (rank == COORDINATOR) {
+		commTimes[5] = dwalltime();
+	}
 
 
 	/*********************************** Secuencial ******************************/
@@ -361,11 +366,11 @@ int main(int argc, char* argv[]){
 		if (check) {
 			printf("\nMultiplicacion de matrices resultado correcto\n");
 
-			totalTime = maxCommTimes[AMOUNT_COMMS - 1] - minCommTimes[0];
+			totalTime = commTimes[AMOUNT_COMMS - 1] - commTimes[0];
 			commTime = 0;
 			for (i = 0; i < AMOUNT_COMMS; i += 2) {
-				printf("\ntiempo %d - %d = %f\n", i+1, i, maxCommTimes[i + 1] - minCommTimes[i]);
-				commTime += (maxCommTimes[i + 1] - minCommTimes[i]);
+				printf("\ntiempo %d - %d = %f\n", i+1, i, commTimes[i + 1] - commTimes[i]);
+				commTime += (commTimes[i + 1] - commTimes[i]);
 			}
 
 			printf("\nMultiplicacion de matrices (N=%d)\tTiempo total=%lf\tTiempo comunicacion=%lf\n", N, totalTime, commTime);

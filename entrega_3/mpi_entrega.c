@@ -39,8 +39,8 @@ int main(int argc, char* argv[]){
 	int AMOUNT_COMMS = 6;
 
 	int numProcs, rank, rowAmount, cellAmount;
+	double commTimes[AMOUNT_COMMS], commTime, totalTime;
 	double average[2], localAverage[2];
-	double commTimes[AMOUNT_COMMS], maxCommTimes[AMOUNT_COMMS], minCommTimes[AMOUNT_COMMS], commTime, totalTime;
 	double *A, *B, *C, *T, *M, *R1, *R2, *RA, *RB, num, aSin, aCos, *ablk, *bblk, *cblk;
 	int N, i, j, k, bs, offset_i, offset_j, row_index, f, c, h, offset_f, offset_c, mini_row_index, size;
 
@@ -50,9 +50,9 @@ int main(int argc, char* argv[]){
 
 	// Controla los argumentos al programa
 	if ((argc != 3)
-		|| ((N = atoi(argv[1])) <= 0)
-		|| ((bs = atoi(argv[2])) <= 0)
-		|| (N % bs != 0))
+	|| ((N = atoi(argv[1])) <= 0)
+	|| ((bs = atoi(argv[2])) <= 0)
+	|| (N % bs != 0))
 	{
 		printf("\nError en los parámetros. Usage: ./%s N BS (N debe ser multiplo de BS)\n", argv[0]);
 		return EXIT_FAILURE;
@@ -113,7 +113,9 @@ int main(int argc, char* argv[]){
 	/*********************************** MPI ******************************/
 
 
-	commTimes[0] =  dwalltime();
+	if (rank == COORDINATOR) {
+		commTimes[0] =  dwalltime();
+	}
 
 	// Reparte las matrices M y T
 	MPI_Scatter(M, cellAmount, MPI_DOUBLE, M, cellAmount, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
@@ -123,7 +125,9 @@ int main(int argc, char* argv[]){
 	MPI_Bcast(A, size, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
 	MPI_Bcast(B, size, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
 
-	commTimes[1] = dwalltime();
+	if (rank == COORDINATOR) {
+		commTimes[1] = dwalltime();
+	}
 
 	// Calcula Rs
 	for (i = 0; i < cellAmount; i++) {
@@ -138,9 +142,14 @@ int main(int argc, char* argv[]){
 
 
 	// Calcula promedios de Rs
-	commTimes[2] = dwalltime();
+	if (rank == COORDINATOR) {
+		commTimes[2] = dwalltime();
+	}
 	MPI_Allreduce(localAverage, average, 2, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-	commTimes[3] = dwalltime();
+
+	if (rank == COORDINATOR) {
+		commTimes[3] = dwalltime();
+	}
 
 	average[0] = (average[0] / size) * (average[1] / size);
 
@@ -206,15 +215,15 @@ int main(int argc, char* argv[]){
 
 
 	// Junta el resultado
-	commTimes[4] = dwalltime();
+	if (rank == COORDINATOR) {
+		commTimes[4] = dwalltime();
+	}
 
 	MPI_Gather(C, cellAmount, MPI_DOUBLE, C, cellAmount, MPI_DOUBLE, COORDINATOR, MPI_COMM_WORLD);
 
-	commTimes[5] = dwalltime();
-
-	// Totaliza los tiempos de comunicación
-	MPI_Reduce(commTimes, minCommTimes, AMOUNT_COMMS, MPI_DOUBLE, MPI_MIN, COORDINATOR, MPI_COMM_WORLD);
-	MPI_Reduce(commTimes, maxCommTimes, AMOUNT_COMMS, MPI_DOUBLE, MPI_MAX, COORDINATOR, MPI_COMM_WORLD);
+	if (rank == COORDINATOR) {
+		commTimes[5] = dwalltime();
+	}
 
 
 	/*********************************** Secuencial ******************************/
@@ -328,8 +337,6 @@ int main(int argc, char* argv[]){
 		printf("Tiempo en segundos del secuencial %f\n", timetick_end_secuencial - timetick_start_secuencial);
 
 
-
-
 		// Comprueba que C y C_secuencial sean iguales
 		int check = 1;
 		for (i = 0; i < size; i++) {
@@ -343,11 +350,11 @@ int main(int argc, char* argv[]){
 		if (check) {
 			printf("Multiplicacion de matrices resultado correcto\n");
 
-			totalTime = maxCommTimes[AMOUNT_COMMS - 1] - minCommTimes[0];
+			totalTime = commTimes[AMOUNT_COMMS - 1] - commTimes[0];
 			commTime = 0;
 			for (i = 0; i < AMOUNT_COMMS; i += 2) {
-				printf("tiempo %d - %d = %f\n", i+1, i, maxCommTimes[i + 1] - minCommTimes[i]);
-				commTime += (maxCommTimes[i + 1] - minCommTimes[i]);
+				printf("tiempo %d - %d = %f\n", i+1, i, commTimes[i + 1] - commTimes[i]);
+				commTime += (commTimes[i + 1] - commTimes[i]);
 			}
 
 			printf("Multiplicacion de matrices (N=%d)\tTiempo total=%lf\tTiempo comunicacion=%lf\n", N, totalTime, commTime);
